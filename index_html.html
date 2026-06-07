@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Конвертер валют | Курсы валют онлайн</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="glass-card">
+    <h1>💱 Конвертер валют</h1>
+    <div class="sub">актуальные курсы • история</div>
+
+    <div class="converter-panel">
+        <div class="currency-row">
+            <div class="currency-box">
+                <label>Из валюты</label>
+                <select id="fromCurrency">
+                    <option value="USD">🇺🇸 USD - Доллар США</option>
+                    <option value="EUR">🇪🇺 EUR - Евро</option>
+                    <option value="RUB">🇷🇺 RUB - Российский рубль</option>
+                    <option value="KZT">🇰🇿 KZT - Казахстанский тенге</option>
+                    <option value="GBP">🇬🇧 GBP - Фунт стерлингов</option>
+                    <option value="CNY">🇨🇳 CNY - Китайский юань</option>
+                </select>
+            </div>
+            <div class="currency-box">
+                <label>В валюту</label>
+                <select id="toCurrency">
+                    <option value="EUR">🇪🇺 EUR - Евро</option>
+                    <option value="USD">🇺🇸 USD - Доллар США</option>
+                    <option value="RUB">🇷🇺 RUB - Российский рубль</option>
+                    <option value="KZT">🇰🇿 KZT - Казахстанский тенге</option>
+                    <option value="GBP">🇬🇧 GBP - Фунт стерлингов</option>
+                    <option value="CNY">🇨🇳 CNY - Китайский юань</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="currency-row">
+            <div class="currency-box">
+                <label>Сумма</label>
+                <input type="number" id="amount" value="100" step="any" placeholder="Введите сумму">
+            </div>
+            <div class="currency-box">
+                <label>Результат</label>
+                <input type="text" id="result" readonly placeholder="0.00" style="background:#0a1118; font-weight:600;">
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 8px;">
+            <button id="convertBtn" class="update-btn" style="background:#3b6e4b; margin-bottom:0;">💲 Конвертировать</button>
+            <button id="swapCurrenciesBtn" class="swap-btn" style="margin-top:0;">⇄</button>
+        </div>
+    </div>
+
+    <div class="result-area">
+        <div class="result-value" id="liveResult">—</div>
+        <div class="rate-info" id="rateMessage">Курс: загружается...</div>
+    </div>
+
+    <button id="fetchRatesBtn" class="update-btn">🔄 Обновить курсы (через API)</button>
+
+    <div class="history-box">
+        <div class="history-header">
+            <h3>📜 История конвертаций</h3>
+            <button id="clearHistoryBtn" class="clear-history">Очистить историю</button>
+        </div>
+        <div id="historyList" class="history-list">
+            <div style="text-align:center; padding: 18px; color:#788aa8;">Здесь будут сохранённые операции</div>
+        </div>
+    </div>
+    <footer>Курсы от exchangerate-api (mock + backup fallback)</footer>
+</div>
+
+<script>
+    // -------- СТАТИЧЕСКИЕ ФИКС КУРСЫ (запасной вариант) ----------
+    const FALLBACK_RATES = {
+        USD: 1,
+        EUR: 0.92,
+        RUB: 92.5,
+        KZT: 460.2,
+        GBP: 0.79,
+        CNY: 7.25
+    };
+
+    let currentRates = { ...FALLBACK_RATES };   // храним текущие курсы (относительно USD)
+    let lastUpdateTime = null;
+
+    // -------- РАБОТА С LOCALSTORAGE (история) ----------
+    let history = [];
+
+    function loadHistoryFromStorage() {
+        const stored = localStorage.getItem("currency_converter_history");
+        if (stored) {
+            try {
+                history = JSON.parse(stored);
+                if (!Array.isArray(history)) history = [];
+            } catch(e) { history = []; }
+        } else {
+            history = [];
+        }
+        renderHistory();
+    }
+
+    function saveHistoryToStorage() {
+        localStorage.setItem("currency_converter_history", JSON.stringify(history.slice(-20))); // храним максимум 20
+    }
+
+    function addToHistory(fromCurr, toCurr, amount, converted, rateUsed) {
+        const now = new Date();
+        const timeStr = now.toLocaleString();
+        history.unshift({   // новые записи сверху
+            from: fromCurr,
+            to: toCurr,
+            amount: amount,
+            result: converted,
+            rate: rateUsed,
+            date: timeStr
+        });
+        if (history.length > 20) history.pop();
+        saveHistoryToStorage();
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const container = document.getElementById("historyList");
+        if (!container) return;
+        if (history.length === 0) {
+            container.innerHTML = '<div style="text-align:center; padding: 18px; color:#788aa8;">📭 История пуста. Сделайте конвертацию</div>';
+            return;
+        }
+        let html = '';
+        for (let item of history) {
+            html += `
+                <div class="history-item">
+                    <div>
+                        <strong>${item.amount} ${item.from}</strong> → <strong>${item.result.toFixed(4)} ${item.to}</strong><br>
+                        <span class="history-date">Курс: 1 ${item.from} = ${item.rate.toFixed(6)} ${item.to}</span>
+                    </div>
+                    <div class="history-date">${item.date}</div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    }
+
+    function clearHistory() {
+        history = [];
+        saveHistoryToStorage();
+        renderHistory();
+    }
+
+    // ---------- КОНВЕРТАЦИЯ ----------
+    // курсы хранятся относительно USD: например currentRates["EUR"] = сколько EUR за 1 USD
+    function convertCurrency(amount, fromCurr, toCurr, rates) {
+        if (!rates[fromCurr] || !rates[toCurr]) return null;
+        // сначала переводим в USD, затем в целевую валюту
+        const amountInUSD = amount / rates[fromCurr];
+        const result = amountInUSD * rates[toCurr];
+        return result;
+    }
+
+    function performConversionAndSave() {
+        const fromCurr = document.getElementById("fromCurrency").value;
+        const toCurr = document.getElementById("toCurrency").value;
+        let amount = parseFloat(document.getElementById("amount").value);
+        if (isNaN(amount) || amount <= 0) {
+            amount = 0;
+            document.getElementById("amount").value = 0;
+        }
+
+        if (!currentRates[fromCurr] || !currentRates[toCurr]) {
+            document.getElementById("liveResult").innerText = "Ошибка курсов";
+            document.getElementById("result").value = "Ошибка";
+            return;
+        }
+
+        const converted = convertCurrency(amount, fromCurr, toCurr, currentRates);
+        if (converted === null) return;
+
+        const formatted = converted.toFixed(6);
+        document.getElementById("result").value = formatted;
+        document.getElementById("liveResult").innerHTML = `${amount} ${fromCurr} = <span style="color:#6bf06b;">${Number(converted).toFixed(4)} ${toCurr}</span>`;
+
+        // курс 1 from -> to
+        const rateOne = converted / amount;
+        document.getElementById("rateMessage").innerHTML = `🔁 1 ${fromCurr} ≈ ${rateOne.toFixed(6)} ${toCurr}  (данные: ${lastUpdateTime ? lastUpdateTime : 'фикс-курсы'})`;
+
+        // Добавляем в историю
+        if (amount > 0) {
+            addToHistory(fromCurr, toCurr, amount, converted, rateOne);
+        }
+    }
+
+    // ---------- ЗАГРУЗКА КУРСОВ ЧЕРЕЗ API (exchangerate-api.com) ----------
+    async function fetchExchangeRates() {
+        const apiKey = "37d7f8a6f12e4fc5a7c7920fe14fedf8";   // публичный демо-ключ (exchangerate-api)
+        // API: https://v6.exchangerate-api.com/v6/API_KEY/latest/USD
+        const url = `https://v6.exchangerate-api.com/v6/${apiKey}/latest/USD`;
+        
+        try {
+            document.getElementById("rateMessage").innerHTML = "⏳ Загрузка курсов с API...";
+            const response = await fetch(url);
+            if (!response.ok) throw new Error("API ответил ошибкой");
+            const data = await response.json();
+            if (data.result === "success" && data.conversion_rates) {
+                const newRates = { ...data.conversion_rates };
+                // оставляем только нужные нам валюты: USD, EUR, RUB, KZT, GBP, CNY
+                const allowed = ["USD", "EUR", "RUB", "KZT", "GBP", "CNY"];
+                const filtered = {};
+                for (let curr of allowed) {
+                    if (newRates[curr]) {
+                        filtered[curr] = newRates[curr];
+                    } else {
+                        // fallback внутри
+                        filtered[curr] = FALLBACK_RATES[curr];
+                    }
+                }
+                // Убедимся, что USD = 1 (по API он и есть 1)
+                filtered["USD"] = 1;
+                currentRates = filtered;
+                const nowDate = new Date().toLocaleTimeString();
+                lastUpdateTime = nowDate;
+                document.getElementById("rateMessage").innerHTML = `✅ Курсы обновлены (${nowDate}) | 1 USD = ${currentRates.EUR} EUR / ${currentRates.RUB} RUB`;
+                performConversionAndSave();  // сразу обновить результат
+            } else {
+                throw new Error("Неверный ответ API");
+            }
+        } catch (error) {
+            console.warn("Ошибка API, используем фиксированные курсы", error);
+            currentRates = { ...FALLBACK_RATES };
+            lastUpdateTime = "фикс-курсы (офлайн)";
+            document.getElementById("rateMessage").innerHTML = "⚠️ Ошибка API, используются локальные курсы. Нажмите ещё раз для проверки соединения";
+            performConversionAndSave();
+        }
+    }
+
+    // Функция для принудительной смены валют местами
+    function swapCurrencies() {
+        const fromSelect = document.getElementById("fromCurrency");
+        const toSelect = document.getElementById("toCurrency");
+        const temp = fromSelect.value;
+        fromSelect.value = toSelect.value;
+        toSelect.value = temp;
+        performConversionAndSave();
+    }
+
+    // ----------------- инициализация и обработчики -----------------
+    document.addEventListener("DOMContentLoaded", () => {
+        loadHistoryFromStorage();
+        
+        // первоначальная попытка подгрузить курсы (если интернет есть)
+        fetchExchangeRates().then(() => {
+            performConversionAndSave();
+        }).catch(() => {
+            currentRates = { ...FALLBACK_RATES };
+            lastUpdateTime = "локальные";
+            document.getElementById("rateMessage").innerHTML = "💾 Работаем с запасными курсами (обновите через кнопку)";
+            performConversionAndSave();
+        });
+
+        const convertBtn = document.getElementById("convertBtn");
+        const swapBtn = document.getElementById("swapCurrenciesBtn");
+        const fetchBtn = document.getElementById("fetchRatesBtn");
+        const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+        const amountInput = document.getElementById("amount");
+        const fromCurrSel = document.getElementById("fromCurrency");
+        const toCurrSel = document.getElementById("toCurrency");
+
+        convertBtn.addEventListener("click", () => performConversionAndSave());
+        swapBtn.addEventListener("click", () => swapCurrencies());
+        fetchBtn.addEventListener("click", () => fetchExchangeRates());
+        clearHistoryBtn.addEventListener("click", () => clearHistory());
+        
+        amountInput.addEventListener("input", () => performConversionAndSave());
+        fromCurrSel.addEventListener("change", () => performConversionAndSave());
+        toCurrSel.addEventListener("change", () => performConversionAndSave());
+    });
+</script>
+</body>
+</html>
